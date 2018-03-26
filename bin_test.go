@@ -3,6 +3,7 @@ package bin
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -11,7 +12,13 @@ import (
 
 var testBuffer = []byte("1234567890abcdefghijklmnopqrstuvwxyz")
 
-func TestNewBuffer(t *testing.T) {
+/*
+===============================================================================
+    BinaryReader
+===============================================================================
+*/
+
+func TestNewReader(t *testing.T) {
 	t.Parallel()
 	bb := NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
 	assert.Equal(t, int64(0), bb.GetPosition())
@@ -371,6 +378,296 @@ func TestDiscardError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+/*
+===============================================================================
+    BinaryWriter
+===============================================================================
+*/
+
+func TestNewWriter(t *testing.T) {
+	t.Parallel()
+	w := bytes.NewBuffer(testBuffer)
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+	assert.Equal(t, int64(0), bw.GetPosition())
+}
+
+func TestWriteByte(t *testing.T) {
+	t.Parallel()
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+	// put all of `testBuffer` into bw byte-by-byte
+	for _, c := range testBuffer {
+		err := bw.WriteByte(c)
+		assert.NoError(t, err)
+	}
+	assert.Equal(t, int64(len(testBuffer)), bw.GetPosition())
+	assert.Equal(t, testBuffer, w.Bytes())
+}
+
+func TestWriteByteError(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteByte(0xFF))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteByte(0xFF))
+}
+
+func TestWrite(t *testing.T) {
+	t.Parallel()
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+	// put all of `testBuffer` into bw
+	nwrite, err := bw.Write(testBuffer)
+	assert.NoError(t, err)
+	assert.Equal(t, len(testBuffer), nwrite)
+	assert.Equal(t, int64(len(testBuffer)), bw.GetPosition())
+	assert.Equal(t, testBuffer, w.Bytes())
+}
+
+func TestWriteBytes(t *testing.T) {
+	t.Parallel()
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+	// put all of `testBuffer` into bw
+	err := bw.WriteBytes(testBuffer)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(len(testBuffer)), bw.GetPosition())
+	assert.Equal(t, testBuffer, w.Bytes())
+}
+
+func TestWriteBytesError(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteBytes([]byte{0xFF}))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteBytes([]byte{0xFF}))
+}
+
+func TestWriteUint16(t *testing.T) {
+	t.Parallel()
+	// Little Endian
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+
+	err := bw.WriteUint16(uint16(1234))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0xD2, 0x04}, w.Bytes())
+	assert.Equal(t, int64(2), bw.GetPosition())
+
+	// Big Endian
+	w = bytes.NewBuffer([]byte{})
+	bw = NewBinaryWriter(w, binary.BigEndian)
+
+	err = bw.WriteUint16(uint16(1234))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x04, 0xD2}, w.Bytes())
+	assert.Equal(t, int64(2), bw.GetPosition())
+}
+
+func TestWriteUint16Error(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteUint16(uint16(1234)))
+
+	// nil byte order
+	bw = BinaryWriter{}
+	bw.dest = bytes.NewBuffer([]byte{})
+	assert.Error(t, bw.WriteUint16(uint16(1234)))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteUint16(uint16(1234)))
+}
+
+func TestWriteUint32(t *testing.T) {
+	t.Parallel()
+	// Little Endian
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+
+	err := bw.WriteUint32(uint32(1234))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0xD2, 0x04, 0x00, 0x00}, w.Bytes())
+	assert.Equal(t, int64(4), bw.GetPosition())
+
+	// Big Endian
+	w = bytes.NewBuffer([]byte{})
+	bw = NewBinaryWriter(w, binary.BigEndian)
+
+	err = bw.WriteUint32(uint32(1234))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x00, 0x00, 0x04, 0xD2}, w.Bytes())
+	assert.Equal(t, int64(4), bw.GetPosition())
+}
+
+func TestWriteUint32Error(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteUint32(uint32(1234)))
+
+	// nil byte order
+	bw = BinaryWriter{}
+	bw.dest = bytes.NewBuffer([]byte{})
+	assert.Error(t, bw.WriteUint32(uint32(1234)))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteUint32(uint32(1234)))
+}
+
+func TestWriteUint64(t *testing.T) {
+	t.Parallel()
+	// Little Endian
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+
+	err := bw.WriteUint64(uint64(123456789))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x15, 0xCD, 0x5B, 0x07, 0x00, 0x00, 0x00, 0x00}, w.Bytes())
+	assert.Equal(t, int64(8), bw.GetPosition())
+
+	// Big Endian
+	w = bytes.NewBuffer([]byte{})
+	bw = NewBinaryWriter(w, binary.BigEndian)
+
+	err = bw.WriteUint64(uint64(123456789))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x00, 0x00, 0x00, 0x00, 0x07, 0x5B, 0xCD, 0x15}, w.Bytes())
+	assert.Equal(t, int64(8), bw.GetPosition())
+}
+
+func TestWriteUint64Error(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteUint64(uint64(1234)))
+
+	// nil byte order
+	bw = BinaryWriter{}
+	bw.dest = bytes.NewBuffer([]byte{})
+	assert.Error(t, bw.WriteUint64(uint64(1234)))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteUint64(uint64(1234)))
+}
+
+func TestWriteFloat32(t *testing.T) {
+	t.Parallel()
+	// Little Endian
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+
+	err := bw.WriteFloat32(float32(1234.5678))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x2B, 0x52, 0x9A, 0x44}, w.Bytes())
+	assert.Equal(t, int64(4), bw.GetPosition())
+
+	// Big Endian
+	w = bytes.NewBuffer([]byte{})
+	bw = NewBinaryWriter(w, binary.BigEndian)
+
+	err = bw.WriteFloat32(float32(1234.5678))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x44, 0x9A, 0x52, 0x2B}, w.Bytes())
+	assert.Equal(t, int64(4), bw.GetPosition())
+}
+
+func TestWriteFloat32Error(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteFloat32(float32(1234.5678)))
+
+	// nil byte order
+	bw = BinaryWriter{}
+	bw.dest = bytes.NewBuffer([]byte{})
+	assert.Error(t, bw.WriteFloat32(float32(1234.5678)))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteFloat32(float32(1234.5678)))
+}
+
+func TestWriteFloat64(t *testing.T) {
+	t.Parallel()
+	// Little Endian
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+
+	err := bw.WriteFloat64(float64(1234.5678))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0xAD, 0xFA, 0x5C, 0x6D, 0x45, 0x4A, 0x93, 0x40}, w.Bytes())
+	assert.Equal(t, int64(8), bw.GetPosition())
+
+	// Big Endian
+	w = bytes.NewBuffer([]byte{})
+	bw = NewBinaryWriter(w, binary.BigEndian)
+
+	err = bw.WriteFloat64(float64(1234.5678))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte{0x40, 0x93, 0x4A, 0x45, 0x6D, 0x5C, 0xFA, 0xAD}, w.Bytes())
+	assert.Equal(t, int64(8), bw.GetPosition())
+}
+
+func TestWriteFloat64Error(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.WriteFloat64(float64(1234.5678)))
+
+	// nil byte order
+	bw = BinaryWriter{}
+	bw.dest = bytes.NewBuffer([]byte{})
+	assert.Error(t, bw.WriteFloat64(float64(1234.5678)))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.WriteFloat64(float64(1234.5678)))
+}
+
+func TestZeroFill(t *testing.T) {
+	t.Parallel()
+	w := bytes.NewBuffer([]byte{})
+	bw := NewBinaryWriter(w, binary.LittleEndian)
+	assert.NoError(t, bw.ZeroFill(64))
+	assert.Equal(t, make([]byte, 64), w.Bytes())
+	assert.Equal(t, int64(64), bw.GetPosition())
+}
+
+func TestZeroFillError(t *testing.T) {
+	t.Parallel()
+	// nil writer
+	bw := BinaryWriter{}
+	bw.bo = binary.LittleEndian
+	assert.Error(t, bw.ZeroFill(64))
+
+	// writer error
+	bw = NewBinaryWriter(errWriter, binary.LittleEndian)
+	assert.Error(t, bw.ZeroFill(64))
+}
+
+/*
+===============================================================================
+    baseBinary
+===============================================================================
+*/
+
 func TestGetPosition(t *testing.T) {
 	t.Parallel()
 	buf := []byte("1234567890abcdef")
@@ -421,6 +718,8 @@ var err error
 var c byte
 var brLE = NewBinaryReader(blackHole, binary.LittleEndian)
 var brBE = NewBinaryReader(blackHole, binary.BigEndian)
+var bwLE = NewBinaryWriter(blackHole, binary.LittleEndian)
+var bwBE = NewBinaryWriter(blackHole, binary.BigEndian)
 
 func (devNull) Read(p []byte) (int, error) {
 	return len(p), nil
@@ -428,6 +727,14 @@ func (devNull) Read(p []byte) (int, error) {
 
 func (devNull) Write(p []byte) (int, error) {
 	return len(p), nil
+}
+
+type errorWriter int
+
+var errWriter = errorWriter(0)
+
+func (errorWriter) Write(p []byte) (int, error) {
+	return len(p), errors.New("error")
 }
 
 func BenchmarkReadByte(b *testing.B) {
@@ -465,6 +772,26 @@ func BenchmarkReadBytes(b *testing.B) {
 	}
 }
 
+func BenchmarkWriteBytes(b *testing.B) {
+	benchmarks := [][]byte{
+		make([]byte, 4),
+		make([]byte, 32),
+		make([]byte, 128),
+		make([]byte, 1024),
+		make([]byte, 4096),
+	}
+	for _, bm := range benchmarks {
+		b.Run(fmt.Sprintf("BenchmarkWriteBytes(%d)", len(bm)), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				err = bwLE.WriteBytes(bm)
+				if err != nil {
+					panic(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkReadUint16(b *testing.B) {
 	ui16 := uint16(9000)
 	for i := 0; i < b.N; i++ {
@@ -474,6 +801,16 @@ func BenchmarkReadUint16(b *testing.B) {
 		}
 		if ui16 != 0 {
 			panic("ui16 != 0")
+		}
+	}
+}
+
+func BenchmarkWriteUint16(b *testing.B) {
+	ui16 := uint16(9000)
+	for i := 0; i < b.N; i++ {
+		err = bwLE.WriteUint16(ui16)
+		if err != nil {
+			panic(err)
 		}
 	}
 }
@@ -502,4 +839,20 @@ func BenchmarkReadUint64(b *testing.B) {
 			panic("ui64 != 0")
 		}
 	}
+}
+
+func TestNewBinaryWriter(t *testing.T) {
+	t.Parallel()
+	NewBinaryWriter(blackHole, binary.LittleEndian)
+	NewBinaryWriter(blackHole, binary.BigEndian)
+}
+
+func TestXYZ(t *testing.T) {
+	dest := bytes.NewBuffer([]byte{})
+	w := NewBinaryWriter(dest, binary.LittleEndian)
+	w.WriteUint32(uint32(0x32323232))
+	w.WriteUint64(uint64(0x6464646464646464))
+	out := dest.Bytes()
+	assert.Equal(t, uint32(0x32323232), binary.LittleEndian.Uint32(out[0:4]))
+	assert.Equal(t, uint64(0x6464646464646464), binary.LittleEndian.Uint64(out[4:12]))
 }

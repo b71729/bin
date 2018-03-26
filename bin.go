@@ -22,6 +22,12 @@ type BinaryReader struct {
 	source io.Reader
 }
 
+// BinaryWriter provides methods for reading various data types to an `io.Writer`.
+type BinaryWriter struct {
+	binaryBase
+	dest io.Writer
+}
+
 // binaryBase contains a set of methods and variables common to sibling
 // interfaces.
 type binaryBase struct {
@@ -60,6 +66,7 @@ func (b *BinaryReader) ReadByte(dst *byte) error {
 // Read satisfies the Liskov Subsitution Principle of its base `io.Reader`
 func (b *BinaryReader) Read(p []byte) (n int, err error) {
 	n, err = b.source.Read(p)
+	b.pos += int64(n)
 	return
 }
 
@@ -191,6 +198,128 @@ func NewBinaryReaderBytes(source []byte, bo binary.ByteOrder) (br BinaryReader) 
 	br.bo = bo
 	return
 }
+
+/*
+===============================================================================
+    BinaryWriter
+===============================================================================
+*/
+
+// WriteByte writes a byte
+func (b *BinaryWriter) WriteByte(src byte) error {
+	if b.dest == nil {
+		return fmt.Errorf("WriteByte(%02X): writer is nil", src)
+	}
+	b.b8[0] = src
+	return b.WriteBytes(b.b8[:1])
+}
+
+// Write satisfies the Liskov Subsitution Principle of its base `io.Writer`
+func (b *BinaryWriter) Write(p []byte) (n int, err error) {
+	n, err = b.dest.Write(p)
+	b.pos += int64(n)
+	return
+}
+
+// WriteBytes writes all bytes from `src`
+func (b *BinaryWriter) WriteBytes(src []byte) error {
+	if b.dest == nil {
+		return errors.New("WriteBytes([]byte): writer is nil")
+	}
+	b.i, b.err = b.dest.Write(src)
+	b.pos += int64(b.i)
+	if b.err != nil {
+		return b.err
+	}
+	return nil
+}
+
+// WriteUint16 writes an unsigned 16-bit integer according to the current byte order.
+func (b *BinaryWriter) WriteUint16(src uint16) error {
+	if b.dest == nil {
+		return fmt.Errorf("WriteUint16(%08X): writer is nil", src)
+	}
+	if b.bo == nil {
+		return fmt.Errorf("WriteUint16(%08X): ByteOrder is not set", src)
+	}
+	b.bo.PutUint16(b.b8[:2], src)
+	return b.WriteBytes(b.b8[:2])
+}
+
+// WriteUint32 writes an unsigned 32-bit integer according to the current byte order.
+func (b *BinaryWriter) WriteUint32(src uint32) error {
+	if b.dest == nil {
+		return fmt.Errorf("WriteUint32(%016X): writer is nil", src)
+	}
+	if b.bo == nil {
+		return fmt.Errorf("WriteUint32(%016X): ByteOrder is not set", src)
+	}
+	b.bo.PutUint32(b.b8[:4], src)
+	return b.WriteBytes(b.b8[:4])
+}
+
+// WriteUint64 writes an unsigned 64-bit integer according to the current byte order.
+func (b *BinaryWriter) WriteUint64(src uint64) error {
+	if b.dest == nil {
+		return fmt.Errorf("WriteUint64(%032X): writer is nil", src)
+	}
+	if b.bo == nil {
+		return fmt.Errorf("WriteUint64(%032X): ByteOrder is not set", src)
+	}
+	b.bo.PutUint64(b.b8[:8], src)
+	return b.WriteBytes(b.b8[:8])
+}
+
+// WriteFloat32 writes a 32-bit IEEE 754 floating-point integer
+// according to the current byte order.
+func (b *BinaryWriter) WriteFloat32(src float32) error {
+	if b.dest == nil {
+		return fmt.Errorf("WriteFloat32(%f): writer is nil", src)
+	}
+	if b.bo == nil {
+		return fmt.Errorf("WriteFloat32(%f): ByteOrder is not set", src)
+	}
+	b.bo.PutUint32(b.b8[:4], math.Float32bits(src))
+	return b.WriteBytes(b.b8[:4])
+}
+
+// WriteFloat64 writes a 64-bit IEEE 754 floating-point integer
+// according to the current byte order.
+func (b *BinaryWriter) WriteFloat64(src float64) error {
+	if b.dest == nil {
+		return fmt.Errorf("WriteFloat64(%f): writer is nil", src)
+	}
+	if b.bo == nil {
+		return fmt.Errorf("WriteFloat64(%f): ByteOrder is not set", src)
+	}
+	b.bo.PutUint64(b.b8[:8], math.Float64bits(src))
+	return b.WriteBytes(b.b8[:8])
+}
+
+// ZeroFill writes `n` null-bytes.
+func (b *BinaryWriter) ZeroFill(n int64) error {
+	if b.dest == nil {
+		return fmt.Errorf("ZeroFill(%d): writer is nil", n)
+	}
+	return b.WriteBytes(make([]byte, n))
+}
+
+// NewBinaryWriter creates a new `BinaryWriter` targetted at the given `dest`,
+// and using the byte order `bo` to specify endianness.
+//
+// For futureproofing, it is suggested to use these constructors rather than
+// manually creating an instance (i.e. `bw := BinaryWriter{}`)
+func NewBinaryWriter(dest io.Writer, bo binary.ByteOrder) (bw BinaryWriter) {
+	bw.dest = dest
+	bw.bo = bo
+	return
+}
+
+/*
+===============================================================================
+    binaryBase
+===============================================================================
+*/
 
 // GetPosition returns the current reader offset as a 64-bit integer.
 func (b *binaryBase) GetPosition() int64 {
