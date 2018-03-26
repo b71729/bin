@@ -1,6 +1,7 @@
 package bin
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -8,29 +9,47 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var testBuffer = []byte("1234567890abcdefghijklmnopqrstuvwxyz")
+
 func TestNewBuffer(t *testing.T) {
 	t.Parallel()
-	buf := []byte{0x00, 0x01, 0x02, 0x03, 0x04}
-	bb := NewBinaryReaderBytes(buf, binary.LittleEndian)
+	bb := NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
 	assert.Equal(t, int64(0), bb.GetPosition())
 }
 
 func TestReadByte(t *testing.T) {
 	t.Parallel()
-	buf := []byte("1234567890abcdef")
-	bb := NewBinaryReaderBytes(buf, binary.LittleEndian)
+	bb := NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
 	c := byte(0)
-	for _, expected := range buf {
+	for _, expected := range testBuffer {
 		err := bb.ReadByte(&c)
 		assert.NoError(t, err)
 		assert.Equal(t, expected, c)
 	}
 }
+func TestReadByteError(t *testing.T) {
+	t.Parallel()
+	bb := NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF
+	bb.source.Read(make([]byte, len(testBuffer)))
+	c := byte(0)
+	err := bb.ReadByte(&c)
+	assert.Error(t, err)
+}
+
+func TestRead(t *testing.T) {
+	t.Parallel()
+	bb := NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	buf := make([]byte, 32)
+	nread, err := bb.Read(buf)
+	assert.NoError(t, err)
+	assert.Equal(t, len(buf), nread)
+	assert.Equal(t, testBuffer[:32], buf[:32])
+}
 
 func TestReadBytes(t *testing.T) {
 	t.Parallel()
-	buf := []byte("1234567890abcdef")
-	buf = append(buf, make([]byte, 1024)...)
+	buf = append(testBuffer, make([]byte, 1024)...)
 	bb := NewBinaryReaderBytes(buf, binary.LittleEndian)
 
 	tmp := make([]byte, 2048)
@@ -51,6 +70,29 @@ func TestReadBytes(t *testing.T) {
 	err = bb.ReadBytes(tmp[:1028])
 	assert.NoError(t, err)
 	assert.Equal(t, buf[6:1034], tmp[:1028])
+}
+
+func TestReadBytesError(t *testing.T) {
+	t.Parallel()
+	buf := make([]byte, 32)
+
+	// nil reader
+	bb := BinaryReader{}
+	err := bb.ReadBytes(buf)
+	assert.Error(t, err)
+
+	// Reached EOF
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	err = bb.ReadBytes(buf)
+	assert.Error(t, err)
+
+	// Reached EOF during read (partial)
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-10))
+	err = bb.ReadBytes(buf)
+	assert.Error(t, err)
 }
 
 func TestReadUint16(t *testing.T) {
@@ -81,6 +123,36 @@ func TestReadUint16(t *testing.T) {
 	assert.Equal(t, uint16(0xFF01), ui16)
 }
 
+func TestReadUint16Error(t *testing.T) {
+	t.Parallel()
+	buf := uint16(0)
+
+	// nil reader
+	bb := BinaryReader{}
+	bb.bo = binary.LittleEndian
+	err := bb.ReadUint16(&buf)
+	assert.Error(t, err)
+
+	// nil byte order
+	bb = BinaryReader{}
+	bb.source = bytes.NewReader(testBuffer)
+	err = bb.ReadUint16(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	err = bb.ReadUint16(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF during read (partial)
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-1))
+	err = bb.ReadUint16(&buf)
+	assert.Error(t, err)
+}
+
 func TestReadUint32(t *testing.T) {
 	t.Parallel()
 	// Little Endian
@@ -100,6 +172,36 @@ func TestReadUint32(t *testing.T) {
 	assert.Equal(t, uint32(0x0800FF01), ui32)
 }
 
+func TestReadUint32Error(t *testing.T) {
+	t.Parallel()
+	buf := uint32(0)
+
+	// nil reader
+	bb := BinaryReader{}
+	bb.bo = binary.LittleEndian
+	err := bb.ReadUint32(&buf)
+	assert.Error(t, err)
+
+	// nil byte order
+	bb = BinaryReader{}
+	bb.source = bytes.NewReader(testBuffer)
+	err = bb.ReadUint32(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	err = bb.ReadUint32(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF during read (partial)
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-3))
+	err = bb.ReadUint32(&buf)
+	assert.Error(t, err)
+}
+
 func TestReadUint64(t *testing.T) {
 	t.Parallel()
 	// Little Endian
@@ -117,6 +219,156 @@ func TestReadUint64(t *testing.T) {
 	err = bb.ReadUint64(&ui64)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(0x800FF010800FF01), ui64)
+}
+
+func TestReadUint64Error(t *testing.T) {
+	t.Parallel()
+	buf := uint64(0)
+
+	// nil reader
+	bb := BinaryReader{}
+	bb.bo = binary.LittleEndian
+	err := bb.ReadUint64(&buf)
+	assert.Error(t, err)
+
+	// nil byte order
+	bb = BinaryReader{}
+	bb.source = bytes.NewReader(testBuffer)
+	err = bb.ReadUint64(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	err = bb.ReadUint64(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF during read (partial)
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-3))
+	err = bb.ReadUint64(&buf)
+	assert.Error(t, err)
+}
+
+func TestReadFloat32(t *testing.T) {
+	t.Parallel()
+	f32 := float32(0)
+
+	// Little Endian
+	buf := []byte{0x79, 0xe9, 0xf6, 0x42}
+	bb := NewBinaryReaderBytes(buf, binary.LittleEndian)
+	err := bb.ReadFloat32(&f32)
+	assert.NoError(t, err)
+	assert.Equal(t, float32(123.456), f32)
+
+	// Big Endian
+	buf = []byte{0x42, 0xf6, 0xe9, 0x79}
+	bb = NewBinaryReaderBytes(buf, binary.BigEndian)
+	err = bb.ReadFloat32(&f32)
+	assert.NoError(t, err)
+	assert.Equal(t, float32(123.456), f32)
+}
+
+func TestReadFloat32Error(t *testing.T) {
+	t.Parallel()
+	buf := float32(0)
+
+	// nil reader
+	bb := BinaryReader{}
+	bb.bo = binary.LittleEndian
+	err := bb.ReadFloat32(&buf)
+	assert.Error(t, err)
+
+	// nil byte order
+	bb = BinaryReader{}
+	bb.source = bytes.NewReader(testBuffer)
+	err = bb.ReadFloat32(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	err = bb.ReadFloat32(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF during read (partial)
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-2))
+	err = bb.ReadFloat32(&buf)
+	assert.Error(t, err)
+}
+
+func TestReadFloat64(t *testing.T) {
+	t.Parallel()
+	f64 := float64(0)
+
+	// Little Endian
+	buf := []byte{0x77, 0xBE, 0x9F, 0x1A, 0x2F, 0xDD, 0x5E, 0x40}
+	bb := NewBinaryReaderBytes(buf, binary.LittleEndian)
+	err := bb.ReadFloat64(&f64)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(123.456), f64)
+
+	// Big Endian
+	buf = []byte{0x40, 0x5E, 0xDD, 0x2F, 0x1A, 0x9F, 0xBE, 0x77}
+	bb = NewBinaryReaderBytes(buf, binary.BigEndian)
+	err = bb.ReadFloat64(&f64)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(123.456), f64)
+}
+
+func TestReadFloat64Error(t *testing.T) {
+	t.Parallel()
+	buf := float64(0)
+
+	// nil reader
+	bb := BinaryReader{}
+	bb.bo = binary.LittleEndian
+	err := bb.ReadFloat64(&buf)
+	assert.Error(t, err)
+
+	// nil byte order
+	bb = BinaryReader{}
+	bb.source = bytes.NewReader(testBuffer)
+	err = bb.ReadFloat64(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	err = bb.ReadFloat64(&buf)
+	assert.Error(t, err)
+
+	// Reached EOF during read (partial)
+	bb = NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-1))
+	err = bb.ReadFloat64(&buf)
+	assert.Error(t, err)
+}
+
+func TestDiscard(t *testing.T) {
+	t.Parallel()
+	bb := NewBinaryReaderBytes(testBuffer, binary.LittleEndian)
+	bb.Discard(0)
+	assert.Equal(t, int64(0), bb.GetPosition())
+	bb.Discard(1)
+	assert.Equal(t, int64(1), bb.GetPosition())
+	bb.Discard(7)
+	assert.Equal(t, int64(8), bb.GetPosition())
+	bb.Discard(2)
+	assert.Equal(t, int64(10), bb.GetPosition())
+}
+
+func TestDiscardError(t *testing.T) {
+	t.Parallel()
+	// nil reader
+	bb := BinaryReader{}
+	bb.bo = binary.LittleEndian
+	err := bb.Discard(2)
+	assert.Error(t, err)
 }
 
 func TestGetPosition(t *testing.T) {

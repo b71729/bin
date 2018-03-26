@@ -77,9 +77,6 @@ func (b *BinaryReader) ReadBytes(dst []byte) error {
 	if b.err != nil {
 		return b.err
 	}
-	if b.i < len(dst) {
-		return io.ErrUnexpectedEOF
-	}
 	return nil
 }
 
