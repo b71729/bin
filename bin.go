@@ -1,3 +1,4 @@
+// Package bin provides utility interfaces for working with binary data streams
 package bin
 
 import (
