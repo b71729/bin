@@ -358,7 +358,7 @@ func TestReadFloat64Error(t *testing.T) {
 
 func TestDiscard(t *testing.T) {
 	t.Parallel()
-	bb := NewReaderBytes(testBuffer, binary.LittleEndian)
+	bb := NewReader(blackHole, binary.LittleEndian)
 	bb.Discard(0)
 	assert.Equal(t, int64(0), bb.GetPosition())
 	bb.Discard(1)
@@ -367,6 +367,15 @@ func TestDiscard(t *testing.T) {
 	assert.Equal(t, int64(8), bb.GetPosition())
 	bb.Discard(2)
 	assert.Equal(t, int64(10), bb.GetPosition())
+
+	// discard (relatively) large amount of bytes
+	expectedPos := int64(10)
+	for _, v := range []int64{800, 1024, 1080, 4096, 8000} {
+		bb.Discard(v)
+		expectedPos += v
+		assert.Equal(t, expectedPos, bb.GetPosition())
+	}
+
 }
 
 func TestDiscardError(t *testing.T) {
@@ -374,7 +383,15 @@ func TestDiscardError(t *testing.T) {
 	// nil reader
 	bb := Reader{}
 	bb.bo = binary.LittleEndian
+	assert.Error(t, bb.Discard(2))
+
+	// reader error
+	bb = NewReader(errRW, binary.LittleEndian)
 	err := bb.Discard(2)
+	assert.Error(t, err)
+
+	// reader error with large enough discard to cause chunking
+	err = bb.Discard(4096)
 	assert.Error(t, err)
 }
 
@@ -428,7 +445,7 @@ func TestWriteByteError(t *testing.T) {
 	assert.Error(t, bw.WriteByte(0xFF))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteByte(0xFF))
 }
 
@@ -463,7 +480,7 @@ func TestWriteBytesError(t *testing.T) {
 	assert.Error(t, bw.WriteBytes([]byte{0xFF}))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteBytes([]byte{0xFF}))
 }
 
@@ -501,7 +518,7 @@ func TestWriteUint16Error(t *testing.T) {
 	assert.Error(t, bw.WriteUint16(uint16(1234)))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteUint16(uint16(1234)))
 }
 
@@ -539,7 +556,7 @@ func TestWriteUint32Error(t *testing.T) {
 	assert.Error(t, bw.WriteUint32(uint32(1234)))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteUint32(uint32(1234)))
 }
 
@@ -577,7 +594,7 @@ func TestWriteUint64Error(t *testing.T) {
 	assert.Error(t, bw.WriteUint64(uint64(1234)))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteUint64(uint64(1234)))
 }
 
@@ -615,7 +632,7 @@ func TestWriteFloat32Error(t *testing.T) {
 	assert.Error(t, bw.WriteFloat32(float32(1234.5678)))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteFloat32(float32(1234.5678)))
 }
 
@@ -653,7 +670,7 @@ func TestWriteFloat64Error(t *testing.T) {
 	assert.Error(t, bw.WriteFloat64(float64(1234.5678)))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.WriteFloat64(float64(1234.5678)))
 }
 
@@ -664,6 +681,14 @@ func TestZeroFill(t *testing.T) {
 	assert.NoError(t, bw.ZeroFill(64))
 	assert.Equal(t, make([]byte, 64), w.Bytes())
 	assert.Equal(t, int64(64), bw.GetPosition())
+
+	// zero-fill (relatively) large amount of bytes
+	expectedPos := int64(64)
+	for _, v := range []int64{800, 1024, 1080, 4096, 8000} {
+		bw.ZeroFill(v)
+		expectedPos += v
+		assert.Equal(t, expectedPos, bw.GetPosition())
+	}
 }
 
 func TestZeroFillError(t *testing.T) {
@@ -674,8 +699,12 @@ func TestZeroFillError(t *testing.T) {
 	assert.Error(t, bw.ZeroFill(64))
 
 	// writer error
-	bw = NewWriter(errWriter, binary.LittleEndian)
+	bw = NewWriter(errRW, binary.LittleEndian)
 	assert.Error(t, bw.ZeroFill(64))
+
+	// writer error with large enough discard to cause chunking
+	err = bw.ZeroFill(4096)
+	assert.Error(t, err)
 }
 
 func TestWriterReset(t *testing.T) {
@@ -762,14 +791,17 @@ func (devNull) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-type errorWriter int
+type errorRW int
 
-var errWriter = errorWriter(0)
+var errRW = errorRW(0)
 
-func (errorWriter) Write(p []byte) (int, error) {
-	return len(p), errors.New("error")
+func (errorRW) Write(p []byte) (int, error) {
+	return 0, errors.New("error")
 }
 
+func (errorRW) Read(p []byte) (int, error) {
+	return 0, errors.New("error")
+}
 func BenchmarkReadByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		err = brLE.ReadByte(&c)
@@ -871,6 +903,46 @@ func BenchmarkReadUint64(b *testing.B) {
 		if ui64 != 0 {
 			panic("ui64 != 0")
 		}
+	}
+}
+
+func BenchmarkDiscard(b *testing.B) {
+	benchmarks := []int64{
+		32,
+		1024,
+		4096,
+		8000,
+		18051,
+	}
+	for _, bm := range benchmarks {
+		b.Run(fmt.Sprintf("BenchmarkDiscard(%d)", bm), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				err = brLE.Discard(bm)
+				if err != nil {
+					panic(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkZeroFill(b *testing.B) {
+	benchmarks := []int64{
+		32,
+		1024,
+		4096,
+		8000,
+		18051,
+	}
+	for _, bm := range benchmarks {
+		b.Run(fmt.Sprintf("BenchmarkZeroFill(%d)", bm), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				err = bwLE.ZeroFill(bm)
+				if err != nil {
+					panic(err)
+				}
+			}
+		})
 	}
 }
 

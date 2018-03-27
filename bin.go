@@ -42,9 +42,11 @@ type binaryBase struct {
 // These variables are **not** safe for concurrent use; can consider the use
 // of Mutex if the need arises.
 type tmpBuffers struct {
-	b8  [8]byte
-	i   int
-	err error
+	_1kb    [1024]byte
+	null1kb [1024]byte // do not write to this
+	i       int
+	i64     int64
+	err     error
 }
 
 /*
@@ -55,11 +57,11 @@ type tmpBuffers struct {
 
 // ReadByte reads one byte into `dst`.
 func (b *Reader) ReadByte(dst *byte) error {
-	b.err = b.ReadBytes(b.b8[:1])
+	b.err = b.ReadBytes(b._1kb[:1])
 	if b.err != nil {
 		return b.err
 	}
-	*dst = b.b8[0]
+	*dst = b._1kb[0]
 	return nil
 }
 
@@ -96,10 +98,10 @@ func (b *Reader) ReadUint16(dst *uint16) error {
 	if b.bo == nil {
 		return errors.New("ReadUint16(): ByteOrder is not set")
 	}
-	if b.err = b.ReadBytes(b.b8[:2]); b.err != nil {
+	if b.err = b.ReadBytes(b._1kb[:2]); b.err != nil {
 		return b.err
 	}
-	*dst = b.bo.Uint16(b.b8[:2])
+	*dst = b.bo.Uint16(b._1kb[:2])
 	return nil
 }
 
@@ -111,10 +113,10 @@ func (b *Reader) ReadUint32(dst *uint32) error {
 	if b.bo == nil {
 		return errors.New("ReadUint32(): ByteOrder is not set")
 	}
-	if b.err = b.ReadBytes(b.b8[:4]); b.err != nil {
+	if b.err = b.ReadBytes(b._1kb[:4]); b.err != nil {
 		return b.err
 	}
-	*dst = b.bo.Uint32(b.b8[:4])
+	*dst = b.bo.Uint32(b._1kb[:4])
 	return nil
 }
 
@@ -126,10 +128,10 @@ func (b *Reader) ReadUint64(dst *uint64) error {
 	if b.bo == nil {
 		return errors.New("ReadUint64(): ByteOrder is not set")
 	}
-	if b.err = b.ReadBytes(b.b8[:8]); b.err != nil {
+	if b.err = b.ReadBytes(b._1kb[:8]); b.err != nil {
 		return b.err
 	}
-	*dst = b.bo.Uint64(b.b8[:8])
+	*dst = b.bo.Uint64(b._1kb[:8])
 	return nil
 }
 
@@ -142,10 +144,10 @@ func (b *Reader) ReadFloat32(dst *float32) error {
 	if b.bo == nil {
 		return errors.New("ReadFloat32(): ByteOrder is not set")
 	}
-	if b.err = b.ReadBytes(b.b8[:4]); b.err != nil {
+	if b.err = b.ReadBytes(b._1kb[:4]); b.err != nil {
 		return b.err
 	}
-	*dst = math.Float32frombits(b.bo.Uint32(b.b8[:4]))
+	*dst = math.Float32frombits(b.bo.Uint32(b._1kb[:4]))
 	return nil
 }
 
@@ -158,20 +160,32 @@ func (b *Reader) ReadFloat64(dst *float64) error {
 	if b.bo == nil {
 		return errors.New("ReadFloat64(): ByteOrder is not set")
 	}
-	if b.err = b.ReadBytes(b.b8[:8]); b.err != nil {
+	if b.err = b.ReadBytes(b._1kb[:8]); b.err != nil {
 		return b.err
 	}
-	*dst = math.Float64frombits(b.bo.Uint64(b.b8[:8]))
+	*dst = math.Float64frombits(b.bo.Uint64(b._1kb[:8]))
 	return nil
 }
 
-// Discard reads `n` bytes into a discarded buffer. This could use optimisation.
+// Discard reads `n` bytes into a discarded buffer.
 func (b *Reader) Discard(n int64) error {
-	// NOTE: Expensive. Needs improving.
 	if b.source == nil {
 		return fmt.Errorf("Discard(%d): reader is nil", n)
 	}
-	return b.ReadBytes(make([]byte, n))
+	b.i64 = n
+	if b.i64 <= 1024 { // shortcut
+		return b.ReadBytes(b._1kb[:n])
+	}
+	// cut away at `n` until we have <= 1024 bytes remaining to discard
+	for b.i64 > 1024 {
+		if b.err = b.ReadBytes(b._1kb[:]); b.err != nil {
+			return b.err
+		}
+		b.i64 -= 1024
+	}
+	// and then discard the rest
+	// this function should have caused zero allocs.
+	return b.ReadBytes(b._1kb[:b.i64])
 }
 
 // Reset resets the reader position and source `io.Reader` to `source`
@@ -217,8 +231,8 @@ func (b *Writer) WriteByte(src byte) error {
 	if b.dest == nil {
 		return fmt.Errorf("WriteByte(%02X): writer is nil", src)
 	}
-	b.b8[0] = src
-	return b.WriteBytes(b.b8[:1])
+	b._1kb[0] = src
+	return b.WriteBytes(b._1kb[:1])
 }
 
 // Write satisfies the Liskov Subsitution Principle of its base `io.Writer`
@@ -249,8 +263,8 @@ func (b *Writer) WriteUint16(src uint16) error {
 	if b.bo == nil {
 		return fmt.Errorf("WriteUint16(%08X): ByteOrder is not set", src)
 	}
-	b.bo.PutUint16(b.b8[:2], src)
-	return b.WriteBytes(b.b8[:2])
+	b.bo.PutUint16(b._1kb[:2], src)
+	return b.WriteBytes(b._1kb[:2])
 }
 
 // WriteUint32 writes an unsigned 32-bit integer according to the current byte order.
@@ -261,8 +275,8 @@ func (b *Writer) WriteUint32(src uint32) error {
 	if b.bo == nil {
 		return fmt.Errorf("WriteUint32(%016X): ByteOrder is not set", src)
 	}
-	b.bo.PutUint32(b.b8[:4], src)
-	return b.WriteBytes(b.b8[:4])
+	b.bo.PutUint32(b._1kb[:4], src)
+	return b.WriteBytes(b._1kb[:4])
 }
 
 // WriteUint64 writes an unsigned 64-bit integer according to the current byte order.
@@ -273,8 +287,8 @@ func (b *Writer) WriteUint64(src uint64) error {
 	if b.bo == nil {
 		return fmt.Errorf("WriteUint64(%032X): ByteOrder is not set", src)
 	}
-	b.bo.PutUint64(b.b8[:8], src)
-	return b.WriteBytes(b.b8[:8])
+	b.bo.PutUint64(b._1kb[:8], src)
+	return b.WriteBytes(b._1kb[:8])
 }
 
 // WriteFloat32 writes a 32-bit IEEE 754 floating-point integer
@@ -286,8 +300,8 @@ func (b *Writer) WriteFloat32(src float32) error {
 	if b.bo == nil {
 		return fmt.Errorf("WriteFloat32(%f): ByteOrder is not set", src)
 	}
-	b.bo.PutUint32(b.b8[:4], math.Float32bits(src))
-	return b.WriteBytes(b.b8[:4])
+	b.bo.PutUint32(b._1kb[:4], math.Float32bits(src))
+	return b.WriteBytes(b._1kb[:4])
 }
 
 // WriteFloat64 writes a 64-bit IEEE 754 floating-point integer
@@ -299,8 +313,8 @@ func (b *Writer) WriteFloat64(src float64) error {
 	if b.bo == nil {
 		return fmt.Errorf("WriteFloat64(%f): ByteOrder is not set", src)
 	}
-	b.bo.PutUint64(b.b8[:8], math.Float64bits(src))
-	return b.WriteBytes(b.b8[:8])
+	b.bo.PutUint64(b._1kb[:8], math.Float64bits(src))
+	return b.WriteBytes(b._1kb[:8])
 }
 
 // ZeroFill writes `n` null-bytes.
@@ -308,7 +322,21 @@ func (b *Writer) ZeroFill(n int64) error {
 	if b.dest == nil {
 		return fmt.Errorf("ZeroFill(%d): writer is nil", n)
 	}
-	return b.WriteBytes(make([]byte, n))
+	b.i64 = n
+	if b.i64 <= 1024 { // shortcut
+		return b.WriteBytes(b.null1kb[:n])
+	}
+	// cut away at `n` until we have <= 1024 bytes remaining to fill
+	for b.i64 > 1024 {
+		if b.err = b.WriteBytes(b.null1kb[:]); b.err != nil {
+			return b.err
+		}
+		b.i64 -= 1024
+	}
+	// and then discard the rest
+	// this function should have caused zero allocs.
+	return b.WriteBytes(b.null1kb[:b.i64])
+
 }
 
 // Reset resets the writer position and source `io.Writer` to `dest`
