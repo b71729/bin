@@ -378,6 +378,22 @@ func TestDiscardError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestReaderReset(t *testing.T) {
+	t.Parallel()
+	// Big Endian reader at position 10
+	bb := NewReaderBytes(testBuffer, binary.BigEndian)
+	assert.NoError(t, bb.Discard(10))
+	assert.Equal(t, int64(10), bb.GetPosition())
+
+	// Reset to Little Endian
+	buf2 := []byte("9876543210")
+	bb.Reset(bytes.NewReader(buf2), binary.LittleEndian)
+	assert.Equal(t, int64(0), bb.GetPosition())
+	assert.Equal(t, binary.LittleEndian, bb.GetByteOrder())
+	assert.NoError(t, bb.Discard(4))
+	assert.Equal(t, int64(4), bb.GetPosition())
+}
+
 /*
 ===============================================================================
     Writer
@@ -660,6 +676,23 @@ func TestZeroFillError(t *testing.T) {
 	// writer error
 	bw = NewWriter(errWriter, binary.LittleEndian)
 	assert.Error(t, bw.ZeroFill(64))
+}
+
+func TestWriterReset(t *testing.T) {
+	t.Parallel()
+	// Big Endian writer at position 10
+	w := bytes.NewBuffer([]byte{})
+	bw := NewWriter(w, binary.BigEndian)
+	assert.NoError(t, bw.ZeroFill(10))
+	assert.Equal(t, int64(10), bw.GetPosition())
+
+	// Reset to Little Endian
+	w2 := bytes.NewBuffer([]byte{})
+	bw.Reset(w2, binary.LittleEndian)
+	assert.Equal(t, int64(0), bw.GetPosition())
+	assert.Equal(t, binary.LittleEndian, bw.GetByteOrder())
+	assert.NoError(t, bw.ZeroFill(4))
+	assert.Equal(t, int64(4), bw.GetPosition())
 }
 
 /*

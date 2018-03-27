@@ -174,6 +174,13 @@ func (b *Reader) Discard(n int64) error {
 	return b.ReadBytes(make([]byte, n))
 }
 
+// Reset resets the reader position and source `io.Reader` to `source`
+func (b *Reader) Reset(source io.Reader, bo binary.ByteOrder) {
+	b.pos = 0
+	b.source = source
+	b.bo = bo
+}
+
 // NewReader creates a new `Reader` encapsulating the given `source`,
 // and using the byte order `bo` to specify endianness.
 //
@@ -302,6 +309,13 @@ func (b *Writer) ZeroFill(n int64) error {
 		return fmt.Errorf("ZeroFill(%d): writer is nil", n)
 	}
 	return b.WriteBytes(make([]byte, n))
+}
+
+// Reset resets the writer position and source `io.Writer` to `dest`
+func (b *Writer) Reset(dest io.Writer, bo binary.ByteOrder) {
+	b.pos = 0
+	b.dest = dest
+	b.bo = bo
 }
 
 // NewWriter creates a new `Writer` targetted at the given `dest`,
