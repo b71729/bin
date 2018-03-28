@@ -356,6 +356,123 @@ func TestReadFloat64Error(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestPeek(t *testing.T) {
+	t.Parallel()
+	bb := NewReaderBytes(testBuffer, binary.LittleEndian)
+	// peek +3
+	pb := make([]byte, 3)
+	assert.NoError(t, bb.Peek(pb))
+	assert.Equal(t, []byte("123"), pb)
+	// should still be at position zero
+	assert.Equal(t, int64(0), bb.GetPosition())
+
+	// read +2, should equal "12"
+	buf := make([]byte, 2)
+	assert.NoError(t, bb.ReadBytes(buf))
+	assert.Equal(t, []byte("12"), buf)
+	assert.Equal(t, int64(2), bb.GetPosition())
+
+	// peek +1
+	pb2 := make([]byte, 1)
+	assert.NoError(t, bb.Peek(pb2))
+	assert.Equal(t, []byte("3"), pb2)
+	// should be at position two
+	assert.Equal(t, int64(2), bb.GetPosition())
+
+	// read +4, should equal "3456"
+	buf = make([]byte, 4)
+	assert.NoError(t, bb.ReadBytes(buf))
+	assert.Equal(t, []byte("3456"), buf)
+	// should be at position 6
+	assert.Equal(t, int64(6), bb.GetPosition())
+}
+
+func TestMultiplePeek(t *testing.T) {
+	t.Parallel()
+	bb := NewReaderBytes(testBuffer, binary.LittleEndian)
+	// peek +3
+	pb := make([]byte, 3)
+	assert.NoError(t, bb.Peek(pb))
+	assert.Equal(t, []byte("123"), pb)
+	// should still be at position zero
+	assert.Equal(t, int64(0), bb.GetPosition())
+
+	// peek +1
+	pb2 := make([]byte, 1)
+	assert.NoError(t, bb.Peek(pb2))
+	assert.Equal(t, []byte("1"), pb2)
+	// should still be at position zero
+	assert.Equal(t, int64(0), bb.GetPosition())
+
+	// read +2, should equal "12"
+	buf := make([]byte, 2)
+	assert.NoError(t, bb.ReadBytes(buf))
+	assert.Equal(t, []byte("12"), buf)
+	assert.Equal(t, int64(2), bb.GetPosition())
+
+	// read +4, should equal "3456"
+	buf = make([]byte, 4)
+	assert.NoError(t, bb.ReadBytes(buf))
+	assert.Equal(t, []byte("3456"), buf)
+	assert.Equal(t, int64(6), bb.GetPosition())
+}
+
+func TestPeakLarge(t *testing.T) {
+	t.Parallel()
+	bb := NewReader(blackHole, binary.LittleEndian)
+
+	// peek +80
+	pb := make([]byte, 80)
+	assert.NoError(t, bb.Peek(pb))
+	assert.Equal(t, int64(0), bb.GetPosition())
+
+	// peek +8192
+	pb = make([]byte, 8192)
+	assert.NoError(t, bb.Peek(pb))
+	assert.Equal(t, int64(0), bb.GetPosition())
+
+	// read +1024, should equal 0x00 x 1024
+	buf := make([]byte, 1024)
+	assert.NoError(t, bb.ReadBytes(buf))
+	assert.Equal(t, make([]byte, 1024), buf)
+	assert.Equal(t, int64(1024), bb.GetPosition())
+
+	bb = NewReader(blackHole, binary.LittleEndian)
+
+	// peek +2048
+	pb = make([]byte, 2048)
+	assert.NoError(t, bb.Peek(pb))
+	assert.Equal(t, int64(0), bb.GetPosition())
+
+	// read +8192, should equal 0x00 x 8192
+	buf = make([]byte, 8192)
+	assert.NoError(t, bb.ReadBytes(buf))
+	assert.Equal(t, make([]byte, 8192), buf)
+	assert.Equal(t, int64(8192), bb.GetPosition())
+
+}
+
+func TestPeekError(t *testing.T) {
+	t.Parallel()
+	buf := make([]byte, 4)
+
+	// nil reader
+	bb := Reader{}
+	bb.bo = binary.LittleEndian
+	assert.Error(t, bb.Peek(buf))
+
+	// Reached EOF
+	bb = NewReaderBytes(testBuffer, binary.LittleEndian)
+	bb.source.Read(make([]byte, len(testBuffer)))
+	assert.Error(t, bb.Peek(buf))
+
+	// Reached EOF during read (partial)
+	bb = NewReaderBytes(testBuffer, binary.LittleEndian)
+	// Reached EOF already
+	bb.source.Read(make([]byte, len(testBuffer)-1))
+	assert.Error(t, bb.Peek(buf))
+}
+
 func TestDiscard(t *testing.T) {
 	t.Parallel()
 	bb := NewReader(blackHole, binary.LittleEndian)
@@ -834,6 +951,43 @@ func BenchmarkReadBytes(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func BenchmarkPeek(b *testing.B) {
+	benchmarks := [][]byte{
+		make([]byte, 4),
+		make([]byte, 128),
+		make([]byte, 512),
+	}
+	for _, bm := range benchmarks {
+		b.Run(fmt.Sprintf("BenchmarkPeek(%d)", len(bm)), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				err = brLE.Peek(bm)
+				if err != nil {
+					panic(err)
+				}
+				brLE.Reset(blackHole, binary.LittleEndian)
+				// to prevent re-use across benchmark runs:
+				//brLE.peekBuffer = make([]byte, 64)
+				// (but this could be argued to be unrealistic, as the reader will
+				// not likely be reset every call to Peek)
+			}
+		})
+	}
+}
+
+func BenchmarkPeekThenRead(b *testing.B) {
+	pb := make([]byte, 4)
+	for i := 0; i < b.N; i++ {
+		err := brLE.Peek(pb)
+		if err != nil {
+			panic(err)
+		}
+		err = brLE.ReadBytes(pb)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 

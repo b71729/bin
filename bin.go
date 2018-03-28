@@ -19,7 +19,10 @@ import (
 // Reader provides methods for reading various data types from an `io.Reader`.
 type Reader struct {
 	binaryBase
-	source io.Reader
+	source     io.Reader
+	peekBuffer []byte // this is initially set to 64 bytes
+	nPeeked    int
+	peekPos    int
 }
 
 // Writer provides methods for reading various data types to an `io.Writer`.
@@ -80,14 +83,39 @@ func (b *Reader) ReadBytes(dst []byte) error {
 	if b.source == nil {
 		return errors.New("ReadBytes([]byte): reader is nil")
 	}
-	// here `io.ReadFull` is used to ensure all requested bytes are read
-	// via repeated `Read` calls
-	b.i, b.err = io.ReadFull(b.source, dst)
-	b.pos += int64(b.i)
-	if b.err != nil {
-		return b.err
+	if (b.nPeeked - b.peekPos) > 0 {
+		b.i = len(dst)
+		// we have peeked some bytes.
+		// therefore, they should be used before remaining bytes in reader.
+		if (b.nPeeked - b.peekPos) >= b.i {
+			// unused bytes in peek buffer exceeed the destination length,
+			// so use up what we can
+			copy(dst, b.peekBuffer[b.peekPos:b.peekPos+b.i])
+			b.peekPos += b.i
+			b.err = nil
+		} else {
+			// more bytes are requested than available in peek buffer
+			// fulfill partially from peek buffer, then `io.ReadFull` the rest
+			copy(dst, b.peekBuffer[b.peekPos:b.nPeeked])
+
+			b.i, b.err = io.ReadFull(b.source, dst[(b.nPeeked-b.peekPos):])
+
+			// also advance reader position by those bytes we used
+			b.i += (b.nPeeked - b.peekPos)
+			// b.nPeeked = 0
+			// b.peekPos = 0
+			// TODO: Is above better?
+			b.peekPos = b.nPeeked
+
+		}
+	} else {
+		// here `io.ReadFull` is used to ensure all requested bytes are read
+		// via repeated `Read` calls
+		b.i, b.err = io.ReadFull(b.source, dst)
 	}
-	return nil
+
+	b.pos += int64(b.i)
+	return b.err
 }
 
 // ReadUint16 reads an unsigned 16-bit integer into `dst` according to the current byte order.
@@ -188,11 +216,66 @@ func (b *Reader) Discard(n int64) error {
 	return b.ReadBytes(b._1kb[:b.i64])
 }
 
+// numUnusedPeekedBytes returns the number of bytes that have been peeked
+// but not consumed in a subsequent call to the reader.
+func (b *Reader) numUnusedPeekedBytes() int {
+	return b.nPeeked - b.peekPos
+}
+
+// Peek returns the next n bytes without advancing the reader.
+// If the operation cannot fully write to `dst`, it will return an error.
+func (b *Reader) Peek(dst []byte) error {
+	if b.source == nil {
+		return fmt.Errorf("Peek([%d]byte): reader is nil", len(dst))
+	}
+	b.i = len(dst)
+	// we may have already peeked bytes
+	if b.numUnusedPeekedBytes() > 0 {
+
+		// we have peeked some bytes.
+		// therefore, they should be used before reading from `source`
+		if b.numUnusedPeekedBytes() >= b.i {
+			// unused bytes in peek buffer exceeed the destination length,
+			// so use up what we can
+			copy(dst, b.peekBuffer[b.peekPos:b.peekPos+b.i])
+			return nil
+		}
+		// more bytes are requested than available in peek buffer
+		// fulfill partially from peek buffer, then `io.ReadFull` the rest
+		copy(dst, b.peekBuffer[b.peekPos:b.nPeeked])
+	}
+	numNeeded := b.i - b.numUnusedPeekedBytes()
+
+	// determine whether we need to grow buffer
+	b.i = ((b.nPeeked + numNeeded) - len(b.peekBuffer)) // if > 0 then we need to grow
+
+	if b.i > 0 {
+		// grow by a minimum of 1kb to reduce overhead
+		if b.i <= 64 {
+			b.peekBuffer = append(b.peekBuffer, make([]byte, 64)...)
+		} else {
+			b.peekBuffer = append(b.peekBuffer, make([]byte, b.i)...)
+		}
+	}
+
+	if b.err = b.ReadBytes(b.peekBuffer[b.nPeeked : b.nPeeked+numNeeded]); b.err != nil {
+		return b.err
+	}
+	// decrement position, since this is just a preview
+	b.pos -= int64(numNeeded)
+
+	copy(dst[b.numUnusedPeekedBytes():], b.peekBuffer[b.nPeeked:b.nPeeked+numNeeded])
+	b.nPeeked += numNeeded
+	return nil
+}
+
 // Reset resets the reader position and source `io.Reader` to `source`
 func (b *Reader) Reset(source io.Reader, bo binary.ByteOrder) {
 	b.pos = 0
 	b.source = source
 	b.bo = bo
+	b.peekPos = 0
+	b.nPeeked = 0
 }
 
 // NewReader creates a new `Reader` encapsulating the given `source`,
@@ -200,10 +283,13 @@ func (b *Reader) Reset(source io.Reader, bo binary.ByteOrder) {
 //
 // For futureproofing, it is suggested to use these constructors rather than
 // manually creating an instance (i.e. `br := Reader{}`)
-func NewReader(source io.Reader, bo binary.ByteOrder) (br Reader) {
-	br.source = source
+func NewReader(source io.Reader, bo binary.ByteOrder) Reader {
+	br := Reader{
+		source:     source,
+		peekBuffer: make([]byte, 64),
+	}
 	br.bo = bo
-	return
+	return br
 }
 
 // NewReaderBytes creates a new `Reader` to read from the given `source`,
@@ -214,10 +300,8 @@ func NewReader(source io.Reader, bo binary.ByteOrder) (br Reader) {
 //
 // For futureproofing, it is suggested to use these constructors rather than
 // manually creating an instance (i.e. `br := Reader{}`)
-func NewReaderBytes(source []byte, bo binary.ByteOrder) (br Reader) {
-	br.source = bytes.NewReader(source)
-	br.bo = bo
-	return
+func NewReaderBytes(source []byte, bo binary.ByteOrder) Reader {
+	return NewReader(bytes.NewReader(source), bo)
 }
 
 /*
