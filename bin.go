@@ -60,8 +60,7 @@ type tmpBuffers struct {
 
 // ReadByte reads one byte into `dst`.
 func (b *Reader) ReadByte(dst *byte) error {
-	b.err = b.ReadBytes(b._1kb[:1])
-	if b.err != nil {
+	if b.err = b.ReadBytes(b._1kb[:1]); b.err != nil {
 		return b.err
 	}
 	*dst = b._1kb[0]
@@ -81,13 +80,17 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 // If unable to completely read into `dst`, `io.ErrUnexpectedEOF` will be returned.
 func (b *Reader) ReadBytes(dst []byte) error {
 	if b.source == nil {
-		return errors.New("ReadBytes([]byte): reader is nil")
+		return fmt.Errorf("ReadBytes([%d]byte): reader is nil", len(dst))
 	}
-	if (b.nPeeked - b.peekPos) > 0 {
+	// shortcut if `dst` has a length of zero
+	if len(dst) == 0 {
+		return nil
+	}
+	if b.numUnusedPeekedBytes() > 0 {
 		b.i = len(dst)
 		// we have peeked some bytes.
 		// therefore, they should be used before remaining bytes in reader.
-		if (b.nPeeked - b.peekPos) >= b.i {
+		if b.numUnusedPeekedBytes() >= b.i {
 			// unused bytes in peek buffer exceeed the destination length,
 			// so use up what we can
 			copy(dst, b.peekBuffer[b.peekPos:b.peekPos+b.i])
@@ -229,6 +232,10 @@ func (b *Reader) Peek(dst []byte) error {
 		return fmt.Errorf("Peek([%d]byte): reader is nil", len(dst))
 	}
 	b.i = len(dst)
+	// shortcut if `dst` has a length of zero
+	if b.i == 0 {
+		return nil
+	}
 	// we may have already peeked bytes
 	if b.numUnusedPeekedBytes() > 0 {
 
@@ -244,10 +251,10 @@ func (b *Reader) Peek(dst []byte) error {
 		// fulfill partially from peek buffer, then `io.ReadFull` the rest
 		copy(dst, b.peekBuffer[b.peekPos:b.nPeeked])
 	}
-	numNeeded := b.i - b.numUnusedPeekedBytes()
+	nRead := b.i - b.numUnusedPeekedBytes()
 
 	// determine whether we need to grow buffer
-	b.i = ((b.nPeeked + numNeeded) - len(b.peekBuffer)) // if > 0 then we need to grow
+	b.i = ((b.nPeeked + nRead) - len(b.peekBuffer)) // if > 0 then we need to grow
 
 	if b.i > 0 {
 		// grow by a minimum of 1kb to reduce overhead
@@ -258,14 +265,12 @@ func (b *Reader) Peek(dst []byte) error {
 		}
 	}
 
-	if b.err = b.ReadBytes(b.peekBuffer[b.nPeeked : b.nPeeked+numNeeded]); b.err != nil {
+	if _, b.err = io.ReadFull(b.source, b.peekBuffer[b.nPeeked:b.nPeeked+nRead]); b.err != nil {
 		return b.err
 	}
-	// decrement position, since this is just a preview
-	b.pos -= int64(numNeeded)
 
-	copy(dst[b.numUnusedPeekedBytes():], b.peekBuffer[b.nPeeked:b.nPeeked+numNeeded])
-	b.nPeeked += numNeeded
+	copy(dst[b.numUnusedPeekedBytes():], b.peekBuffer[b.nPeeked:b.nPeeked+nRead])
+	b.nPeeked += nRead
 	return nil
 }
 
@@ -321,6 +326,10 @@ func (b *Writer) WriteByte(src byte) error {
 
 // Write satisfies the Liskov Subsitution Principle of its base `io.Writer`
 func (b *Writer) Write(p []byte) (n int, err error) {
+	// shortcut if `p` has a length of zero
+	if len(p) == 0 {
+		return 0, nil
+	}
 	n, err = b.dest.Write(p)
 	b.pos += int64(n)
 	return
@@ -330,6 +339,10 @@ func (b *Writer) Write(p []byte) (n int, err error) {
 func (b *Writer) WriteBytes(src []byte) error {
 	if b.dest == nil {
 		return errors.New("WriteBytes([]byte): writer is nil")
+	}
+	// shortcut if `src` has a length of zero
+	if len(src) == 0 {
+		return nil
 	}
 	b.i, b.err = b.dest.Write(src)
 	b.pos += int64(b.i)
@@ -405,6 +418,14 @@ func (b *Writer) WriteFloat64(src float64) error {
 func (b *Writer) ZeroFill(n int64) error {
 	if b.dest == nil {
 		return fmt.Errorf("ZeroFill(%d): writer is nil", n)
+	}
+	// cleanse input to procedure
+	if n < 0 {
+		return fmt.Errorf("ZeroFill(%d): negative length", n)
+	}
+	// shortcut if `n` is zero
+	if n == 0 {
+		return nil
 	}
 	b.i64 = n
 	if b.i64 <= 1024 { // shortcut

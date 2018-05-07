@@ -385,6 +385,11 @@ func TestPeek(t *testing.T) {
 	assert.Equal(t, []byte("3456"), buf)
 	// should be at position 6
 	assert.Equal(t, int64(6), bb.GetPosition())
+
+	// peek +0
+	assert.NoError(t, bb.Peek([]byte{}))
+	// should be at position 6
+	assert.Equal(t, int64(6), bb.GetPosition())
 }
 
 func TestMultiplePeek(t *testing.T) {
@@ -576,6 +581,12 @@ func TestWrite(t *testing.T) {
 	assert.Equal(t, len(testBuffer), nwrite)
 	assert.Equal(t, int64(len(testBuffer)), bw.GetPosition())
 	assert.Equal(t, testBuffer, w.Bytes())
+
+	nwrite, err = bw.Write([]byte{})
+	assert.NoError(t, err)
+	assert.Equal(t, 0, nwrite)
+	assert.Equal(t, int64(len(testBuffer)), bw.GetPosition())
+	assert.Equal(t, testBuffer, w.Bytes())
 }
 
 func TestWriteBytes(t *testing.T) {
@@ -587,6 +598,8 @@ func TestWriteBytes(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(len(testBuffer)), bw.GetPosition())
 	assert.Equal(t, testBuffer, w.Bytes())
+
+	assert.NoError(t, bw.WriteBytes([]byte{}))
 }
 
 func TestWriteBytesError(t *testing.T) {
@@ -799,6 +812,9 @@ func TestZeroFill(t *testing.T) {
 	assert.Equal(t, make([]byte, 64), w.Bytes())
 	assert.Equal(t, int64(64), bw.GetPosition())
 
+	// ZeroFill zero length should shortcut
+	assert.NoError(t, bw.ZeroFill(0))
+
 	// zero-fill (relatively) large amount of bytes
 	expectedPos := int64(64)
 	for _, v := range []int64{800, 1024, 1080, 4096, 8000} {
@@ -822,6 +838,9 @@ func TestZeroFillError(t *testing.T) {
 	// writer error with large enough discard to cause chunking
 	err = bw.ZeroFill(4096)
 	assert.Error(t, err)
+
+	// ZeroFill with negative length
+	assert.Error(t, bw.ZeroFill(-1))
 }
 
 func TestWriterReset(t *testing.T) {
@@ -909,8 +928,10 @@ func (devNull) Write(p []byte) (int, error) {
 }
 
 type errorRW int
+type negativeRW int
 
 var errRW = errorRW(0)
+var negRW = negativeRW(0)
 
 func (errorRW) Write(p []byte) (int, error) {
 	return 0, errors.New("error")
@@ -918,6 +939,14 @@ func (errorRW) Write(p []byte) (int, error) {
 
 func (errorRW) Read(p []byte) (int, error) {
 	return 0, errors.New("error")
+}
+
+func (negativeRW) Write(p []byte) (int, error) {
+	return -len(p), nil
+}
+
+func (negativeRW) Read(p []byte) (int, error) {
+	return -len(p), nil
 }
 func BenchmarkReadByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
